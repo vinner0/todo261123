@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>To-Do</title>
+<style>
+  :root { color-scheme: light; --bg: #fff; --fg: #000; --line: #ddd; --muted: #666; --done: #888; }
+  :root[data-theme=dark] { color-scheme: dark; --bg: #1e1e1e; --fg: #eee; --line: #444; --muted: #aaa; --done: #777; }
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; }
+  h1 { text-align: center; }
+  #theme { float: right; padding: 4px 8px; }
+  select { padding: 8px; font-size: 1rem; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  input[type=text], input[type=date] { padding: 8px; font-size: 1rem; }
+  #text { flex: 1 1 100%; }
+  #cat { flex: 1; min-width: 0; }
+  li.editing select { max-width: 8em; }
+  .meta { display: block; font-size: .8rem; color: var(--muted); overflow-wrap: anywhere; }
+  .meta.overdue { color: #c00; font-weight: 600; }
+  li.editing { flex-wrap: wrap; }
+  li.editing .t { flex: 1 1 60%; }
+  button { padding: 8px 12px; font-size: 1rem; cursor: pointer; }
+  ul { list-style: none; padding: 0; }
+  li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  li span { flex: 1; }
+  li.done span { text-decoration: line-through; color: var(--done); }
+</style>
+</head>
+<body>
+<button type="button" id="theme"></button>
+<h1>To-Do</h1>
+<form id="form">
+  <input type="text" id="text" placeholder="New task" autocomplete="off" required>
+  <select id="cat" aria-label="Category"></select>
+  <input type="date" id="due" title="Due date">
+  <button type="submit">Add</button>
+</form>
+<ul id="list"></ul>
+<script>
+let tasks = [];
+try { tasks = JSON.parse(localStorage.getItem('tasks')) || []; } catch (e) {}
+
+const CATS = ['Work', 'Personal', 'Others'];
+let editingId = null;
+const list = document.getElementById('list');
+
+function fillCats(sel, current) {
+  const names = current && !CATS.includes(current) ? [...CATS, current] : CATS;
+  names.forEach(c => {
+    const o = document.createElement('option');
+    o.value = o.textContent = c;
+    sel.appendChild(o);
+  });
+  sel.value = current || CATS[0];
+}
+
+const themeSel = document.getElementById('theme');
+function setTheme(v) {
+  document.documentElement.dataset.theme = v;
+  themeSel.textContent = v === 'dark' ? '☀️' : '🌙';
+  themeSel.title = themeSel.ariaLabel = v === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+}
+let theme = null;
+try { theme = localStorage.getItem('theme'); } catch (e) {}
+setTheme(theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+themeSel.onclick = () => {
+  const v = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  setTheme(v);
+  try { localStorage.setItem('theme', v); } catch (e) {}
+};
+fillCats(document.getElementById('cat'));
+
+function save() {
+  try { localStorage.setItem('tasks', JSON.stringify(tasks)); } catch (e) {}
+}
+
+function today() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+function render() {
+  list.innerHTML = '';
+  tasks.forEach(t => {
+    const li = document.createElement('li');
+    if (t.done) li.className = 'done';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = t.done;
+    cb.onchange = () => { t.done = cb.checked; save(); render(); };
+
+    const del = document.createElement('button');
+    del.textContent = '🗑️';
+    del.title = del.ariaLabel = 'Delete';
+    del.onclick = () => { tasks = tasks.filter(x => x.id !== t.id); save(); render(); };
+
+    if (t.id === editingId) {
+      li.className = 'editing';
+      const edit = document.createElement('input');
+      edit.type = 'text';
+      edit.className = 't';
+      edit.value = t.text;
+      const eCat = document.createElement('select');
+      fillCats(eCat, t.cat);
+      const eDue = document.createElement('input');
+      eDue.type = 'date';
+      eDue.value = t.due || '';
+      const finish = ok => {
+        const v = edit.value.trim();
+        if (ok && v) { t.text = v; t.cat = eCat.value; t.due = eDue.value; save(); }
+        editingId = null;
+        render();
+      };
+      li.onkeydown = e => {
+        if (e.key === 'Enter') finish(true);
+        else if (e.key === 'Escape') finish(false);
+      };
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = 'Save';
+      saveBtn.onclick = () => finish(true);
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.onclick = () => finish(false);
+      li.append(cb, edit, eCat, eDue, saveBtn, cancelBtn);
+      list.appendChild(li);
+      edit.focus();
+      return;
+    }
+
+    const span = document.createElement('span');
+    span.textContent = t.text;
+    const parts = [];
+    if (t.cat) parts.push(t.cat);
+    if (t.due) {
+      const d = new Date(t.due + 'T00:00:00');
+      const opts = { day: 'numeric', month: 'short' };
+      if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+      parts.push('Due ' + d.toLocaleDateString('en-GB', opts));
+    }
+    if (parts.length) {
+      const meta = document.createElement('small');
+      meta.className = 'meta';
+      meta.textContent = parts.join(' · ');
+      if (t.due && !t.done && t.due < today()) meta.classList.add('overdue');
+      span.appendChild(meta);
+    }
+
+    const editBtn = document.createElement('button');
+    editBtn.textContent = '✏️';
+    editBtn.title = editBtn.ariaLabel = 'Edit';
+    editBtn.onclick = () => { editingId = t.id; render(); };
+
+    li.append(cb, span, editBtn, del);
+    list.appendChild(li);
+  });
+}
+
+document.getElementById('form').onsubmit = e => {
+  e.preventDefault();
+  const input = document.getElementById('text');
+  const text = input.value.trim();
+  if (!text) return;
+  const cat = document.getElementById('cat');
+  const due = document.getElementById('due');
+  tasks.push({ id: Date.now(), text, done: false, cat: cat.value, due: due.value });
+  input.value = '';
+  due.value = '';
+  save();
+  render();
+};
+
+render();
+</script>
+</body>
+</html>
